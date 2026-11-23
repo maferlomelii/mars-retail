@@ -26,6 +26,7 @@ from yaml.loader import SafeLoader
 import agente
 import datos_demo
 import motor
+import simulador
 from report import build_pdf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -201,9 +202,9 @@ if estado_login is None:
 marca_slot.empty()
 
 # ------------------------------------------------------------------- barra lateral
-PAGINAS = ["📊 Resumen", "🗺️ Regiones y tiendas", "🚨 Alertas", "🤖 Pregúntale a la base", "🧪 Calidad del dato", "📄 Reporte"]
+PAGINAS = ["📊 Resumen", "🗺️ Regiones y tiendas", "🚨 Alertas", "🎛️ Simulador", "🤖 Pregúntale a la base", "🧪 Calidad del dato", "📄 Reporte"]
 QUIEN = {"📊 Resumen": "Dirección", "🗺️ Regiones y tiendas": "Mandos medios", "🚨 Alertas": "Operaciones",
-         "🤖 Pregúntale a la base": "Todos", "🧪 Calidad del dato": "Todos", "📄 Reporte": "Dirección"}
+         "🎛️ Simulador": "Todos", "🤖 Pregúntale a la base": "Todos", "🧪 Calidad del dato": "Todos", "📄 Reporte": "Dirección"}
 with st.sidebar:
     st.markdown("<div class='brand'>MARS<span>.</span><small>Retail Intelligence</small></div>", unsafe_allow_html=True)
     st.write("")
@@ -519,9 +520,133 @@ def pagina_alertas():
     st.download_button("⬇️ Descargar lista completa (CSV)", vista.to_csv(index=False).encode("utf-8-sig"),
                        f"acciones_{semana}.csv", "text/csv")
 
+SIM_KEYS = {"demanda_pct": 0, "demanda_cadenas": [], "visitas_extra": 0, "reasignar": False, "efecto_visita": 50,
+            "resurtir_pct": 0, "rebalanceo_pct": 0, "excedente_pct": 0, "estancado_pct": 0,
+            "dias_max": int(MARCA["umbrales"]["dias_max"])}
+
+
+@st.cache_data(max_entries=30, show_spinner="Simulando…")
+def correr_sim(_h, _T, _TI, clave, params_txt):
+    hs, Ts, Ks, det = simulador.simular(_h, _T, _TI, MARCA, json.loads(params_txt))
+    return hs[["estatus"]], Ks, det
+
+
+def pagina_simulador():
+    st.caption("Mueve los controles para ver cómo cambiarían los indicadores de la semana elegida. Son estimaciones con "
+               "supuestos (abajo se explica cada uno), no predicciones.")
+    candidatas = int((T["prioritaria"] & (T["se_visita"] == "No")).sum())
+    escenarios = MARCA.get("escenarios", {})
+
+    def cargar():
+        nombre = st.session_state["sim_escenario"]
+        base = dict(SIM_KEYS)
+        base.update(escenarios.get(nombre, {}).get("params", {}))
+        if base["visitas_extra"] == -1 or base["visitas_extra"] > candidatas:
+            base["visitas_extra"] = candidatas
+        base["demanda_cadenas"] = [c for c in base["demanda_cadenas"] if c in cadenas_todas]
+        for k, v in base.items():
+            st.session_state[f"sim_{k}"] = v
+
+    for k, v in SIM_KEYS.items():
+        st.session_state.setdefault(f"sim_{k}", v)
+    if st.session_state["sim_visitas_extra"] > candidatas:
+        st.session_state["sim_visitas_extra"] = candidatas
+    nombres = ["✏️ Personalizado (mueve los controles)"] + list(escenarios)
+    st.selectbox("Escenario guardado", nombres, key="sim_escenario", on_change=cargar)
+    desc = escenarios.get(st.session_state["sim_escenario"], {}).get("descripcion")
+    if desc:
+        st.caption(desc)
+
+    with st.container(border=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**📈 Demanda**")
+            st.slider("La venta cambia (%)", -50, 100, step=5, key="sim_demanda_pct")
+            st.multiselect("Solo en estas cadenas", cadenas_todas, key="sim_demanda_cadenas", placeholder="Todas")
+            st.markdown("**📏 Regla de excedente**")
+            st.slider("Excedente a partir de (días)", 60, 180, step=10, key="sim_dias_max")
+        with c2:
+            st.markdown("**🚚 Visitas**")
+            st.slider(f"Tiendas prioritarias que entran a la ruta (hoy {candidatas} no se visitan)", 0, max(candidatas, 1),
+                      key="sim_visitas_extra", disabled=candidatas == 0)
+            st.toggle("Con el mismo equipo (sacar las visitadas menos urgentes)", key="sim_reasignar")
+            st.slider("Qué tanto resuelve una visita (% de agotados y estancado)", 0, 100, step=10, key="sim_efecto_visita")
+        with c3:
+            st.markdown("**📦 Inventario**")
+            st.slider("Resurtir agotados (%)", 0, 100, step=10, key="sim_resurtir_pct")
+            st.slider("Mover excedente a donde falta (%)", 0, 100, step=10, key="sim_rebalanceo_pct")
+            st.slider("Reducir el excedente que queda (%)", 0, 100, step=5, key="sim_excedente_pct",
+                      help="Promoción, devolución o dejar de resurtir")
+            st.slider("Recuperar inventario estancado (%)", 0, 100, step=5, key="sim_estancado_pct",
+                      help="Sacarlo de bodega, corregir inventario fantasma o devolverlo")
+
+    params = {k: st.session_state[f"sim_{k}"] for k in SIM_KEYS}
+    if params["dias_max"] == int(MARCA["umbrales"]["dias_max"]):
+        params["dias_max"] = None
+    est_s, Ks, det = correr_sim(h, T, TI, f"{ORIGEN_KEY}|{semana}|{CADS}", json.dumps(params, sort_keys=True))
+
+    st.markdown(f"<div class='palabras'>{negritas(simulador.resumen(K, Ks, det, MARCA))}</div>", unsafe_allow_html=True)
+    st.write("")
+    cuales = ["agotados", "excedente", "estancado", "prioritarias", "dias", "venta"]
+    for i in range(0, len(cuales), 3):
+        cols = st.columns(3)
+        for kp, col in zip(cuales[i:i + 3], cols):
+            cfg = KCFG[kp]
+            hoy, sim = K.get(kp), Ks.get(kp)
+            e, txt = motor.estado(kp, sim, cfg, hoy)
+            delta = "&nbsp;"
+            if pd.notna(hoy) and pd.notna(sim):
+                dif = (sim / hoy - 1) * 100 if kp == "venta" and hoy else sim - hoy
+                if abs(dif) >= 0.05:
+                    bien = (dif > 0) == cfg["mas_es_mejor"]
+                    u = {"venta": "%", "dias": " días"}.get(kp, " pts")
+                    delta = f"<span class='{'d-bien' if bien else 'd-mal'}'>{'▲' if dif > 0 else '▼'} {abs(dif):.1f}{u}</span> vs. hoy"
+            col.markdown(f"<div class='kpi'><div class='u'>Simulado</div><div class='n'>{cfg['nombre']}</div>"
+                         f"<div class='v'>{motor.fmt(kp, sim)}</div><div class='m'>Hoy: {motor.fmt(kp, hoy)} · {meta_txt(kp)}<br>{delta}</div>"
+                         f"<span class='pill {e}'>{txt}</span></div>", unsafe_allow_html=True)
+        st.write("")
+
+    por_hoy = int((h["estatus"] == "Por agotarse").sum())
+    por_sim = int((est_s["estatus"] == "Por agotarse").sum())
+    chips = [f"🔴 Productos agotados: <b>{det['agotados_hoy']:,} → {det['agotados_sim']:,}</b>",
+             f"🟠 Por agotarse: <b>{por_hoy:,} → {por_sim:,}</b>"]
+    for clave, txt in [("venta_recuperada", "pzs/semana de venta recuperada"), ("piezas_resurtidas", "pzs resurtidas"),
+                       ("piezas_movidas", "pzs movidas entre tiendas"), ("piezas_reducidas", "pzs de excedente reducidas"),
+                       ("piezas_recuperadas", "pzs estancadas recuperadas")]:
+        if det.get(clave):
+            chips.append(f"<b>{det[clave]:,.0f}</b> {txt}")
+    if det.get("tiendas_nuevas"):
+        chips.append(f"🚚 <b>{len(det['tiendas_nuevas'])}</b> tiendas nuevas en ruta")
+    st.markdown("".join(f"<span class='chip'>{c}</span>" for c in chips), unsafe_allow_html=True)
+
+    st.subheader("Hoy vs. simulado")
+    filas = []
+    for kp in ["agotados", "excedente", "estancado", "prioritarias"]:
+        for nombre, v in [("Hoy", K.get(kp)), ("Simulado", Ks.get(kp))]:
+            filas.append({"Indicador": KCFG[kp]["nombre"], "Escenario": nombre, "valor": v, "meta": KCFG[kp]["meta"]})
+    G = pd.DataFrame(filas)
+    base = alt.Chart(G).encode(x=alt.X("Indicador:N", title=None, sort=None, axis=alt.Axis(labelAngle=0, labelLimit=200)))
+    barras = base.mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+        xOffset=alt.XOffset("Escenario:N", sort=["Hoy", "Simulado"]), y=alt.Y("valor:Q", title="%"),
+        color=alt.Color("Escenario:N", scale=alt.Scale(domain=["Hoy", "Simulado"], range=["#B8C0E8", C["acento"]]),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=["Indicador", "Escenario", alt.Tooltip("valor:Q", format=".1f")])
+    textos = base.mark_text(dy=-8, fontWeight="bold", color=C["oscuro"]).encode(
+        xOffset=alt.XOffset("Escenario:N", sort=["Hoy", "Simulado"]), y="valor:Q", text=alt.Text("valor:Q", format=".1f"))
+    metas = alt.Chart(G.drop_duplicates("Indicador")).mark_tick(color=C["verde"], thickness=3, size=70).encode(
+        x=alt.X("Indicador:N", sort=None), y="meta:Q", tooltip=[alt.Tooltip("meta:Q", title="Meta")])
+    st.altair_chart((barras + textos + metas).properties(height=320), width="stretch")
+    st.caption("Línea verde: meta de cada indicador.")
+
+    if det["supuestos"]:
+        st.subheader("Supuestos de este escenario")
+        st.markdown("\n".join(f"- {x}" for x in det["supuestos"]))
+        st.caption("Para defenderlo en la presentación: cada número sale de aplicar estas reglas a la base real de la semana.")
+
+
 SUGERENCIAS = ["¿Cuánto vendió SM PUEBLA esta semana?", "¿Qué cadena tiene más productos agotados?",
                "Top 5 tiendas más urgentes que no se visitan", "¿Cómo va MIX MARS?",
-               "¿Qué tiene que hacer el Ejecutivo 14?", "¿Cómo cambió la venta de Soriana semana a semana?"]
+               "¿Qué tiene que hacer el Ejecutivo 14?", "¿Qué pasaría con los agotados si la venta sube 30% en Navidad?"]
 
 
 @st.cache_resource(show_spinner=False)
@@ -643,7 +768,7 @@ if CAL["resumen"].loc[semana, "Venta sospechosa"]:
     st.warning(f"La venta de esta semana no cuadra con la anterior. Se recomienda usar {motor.etiqueta_semana(CAL['recomendada'])}.")
 
 {"📊 Resumen": pagina_resumen, "🗺️ Regiones y tiendas": pagina_regiones, "🚨 Alertas": pagina_alertas,
- "🤖 Pregúntale a la base": pagina_chat, "🧪 Calidad del dato": pagina_calidad, "📄 Reporte": pagina_reporte}[pagina]()
+ "🎛️ Simulador": pagina_simulador, "🤖 Pregúntale a la base": pagina_chat, "🧪 Calidad del dato": pagina_calidad, "📄 Reporte": pagina_reporte}[pagina]()
 
 
 # Revisa cada minuto si el Excel de Drive cambió; si sí, recarga todo solo.

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 import motor
+import simulador
 
 MODELO = "claude-haiku-5-5"
 MAX_VUELTAS = 6
@@ -369,6 +370,33 @@ def h_visitadas(D: Datos, semana=None, cadena=None):
             "nota": "Mars visita sobre todo tiendas grandes: la diferencia no prueba por sí sola que la visita cause la venta."}
 
 
+def h_simular(D: Datos, escenario=None, demanda_pct=0, demanda_cadenas=None, visitas_extra=0, reasignar=False,
+              efecto_visita=50, resurtir_pct=0, rebalanceo_pct=0, excedente_pct=0, estancado_pct=0, dias_max=None, semana=None):
+    k, h, T, K = D.calc(semana)
+    guardados = D.M.get("escenarios", {})
+    if escenario:
+        nombre = next((n for n in guardados if _norm(escenario) in _norm(n) or _norm(n).strip() == _norm(escenario)), None)
+        if not nombre:
+            return {"error": "No existe ese escenario guardado.", "escenarios_guardados": list(guardados)}
+        params = dict(guardados[nombre]["params"])
+    else:
+        nombre = "personalizado"
+        params = {"demanda_pct": demanda_pct, "demanda_cadenas": [c for x in (demanda_cadenas or []) for c in D.cads(x)],
+                  "visitas_extra": visitas_extra, "reasignar": reasignar, "efecto_visita": efecto_visita,
+                  "resurtir_pct": resurtir_pct, "rebalanceo_pct": rebalanceo_pct, "excedente_pct": excedente_pct,
+                  "estancado_pct": estancado_pct, "dias_max": dias_max}
+    hs, Ts, Ks, det = simulador.simular(h, T, D.TI, D.M, params)
+    cfg = D.M["kpis"]
+    kp_ = ["agotados", "excedente", "estancado", "prioritarias", "dias", "venta"]
+    return {"semana": motor.etiqueta_semana(k), "escenario": nombre, "parametros": params,
+            "kpis": {cfg[x]["nombre"]: {"hoy": motor.fmt(x, K[x]), "simulado": motor.fmt(x, Ks[x]),
+                                        "estado_simulado": motor.estado(x, Ks[x], cfg[x], K[x])[1]} for x in kp_},
+            "productos_agotados": f"{det['agotados_hoy']} -> {det['agotados_sim']}",
+            "venta_recuperada_pzs_sem": _r(det["venta_recuperada"], 0),
+            "supuestos": det["supuestos"],
+            "nota": "Es una estimación con supuestos, no una predicción. Menciónalo y di los supuestos principales."}
+
+
 SEMANA = {"type": "string", "description": "Semana, ej. 'S3' o 'P11 S3'. Omitir = semana recomendada."}
 CADENA = {"type": "string", "description": "Cadena (WALMART, Soriana, Chedraui, HEB, SAMS, COSTCO, City Club). Omitir = todas."}
 
@@ -396,12 +424,26 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"tienda": {"type": "string"}, "ejecutivo": {"type": "string", "description": "ej. 'Ejecutivo 14'"},
                                                        "tipo": {"type": "string", "enum": ["Agotado", "Por agotarse", "Estancado", "Excedente"]},
                                                        "n": {"type": "integer"}, "semana": SEMANA, "cadena": CADENA}}},
+    {"name": "simular", "description": "Simula '¿qué pasaría si…?' y regresa los KPIs de hoy vs. simulados. Úsala para "
+     "preguntas hipotéticas: cambios de demanda (ej. Navidad), visitar más tiendas, resurtir agotados, mover o reducir "
+     "excedente, recuperar estancado o cambiar la regla de días. Puede usar un escenario guardado por nombre.",
+     "input_schema": {"type": "object", "properties": {
+         "escenario": {"type": "string", "description": "Nombre de un escenario guardado (Navidad sin plan, Reasignar visitas, "
+                                                         "Rebalanceo de excedente, Limpieza de estancado, Plan para llegar a las metas, Navidad con plan). Si se usa, ignora lo demás."},
+         "demanda_pct": {"type": "number", "description": "Cambio de venta en %, de -50 a 100"},
+         "demanda_cadenas": {"type": "array", "items": {"type": "string"}, "description": "Cadenas donde cambia la venta (vacío = todas)"},
+         "visitas_extra": {"type": "integer", "description": "Tiendas prioritarias sin visita que entran a la ruta (-1 = todas)"},
+         "reasignar": {"type": "boolean", "description": "Mismo equipo: salen de la ruta las visitadas menos urgentes"},
+         "efecto_visita": {"type": "number", "description": "% de agotados y estancado que resuelve una visita (defecto 50)"},
+         "resurtir_pct": {"type": "number"}, "rebalanceo_pct": {"type": "number"}, "excedente_pct": {"type": "number"},
+         "estancado_pct": {"type": "number"}, "dias_max": {"type": "number", "description": "Días a partir de los que hay excedente"},
+         "semana": SEMANA}}},
     {"name": "visitadas_vs_no", "description": "Compara tiendas visitadas contra no visitadas: tiendas, venta, venta por tienda, % agotados y % estancado.",
      "input_schema": {"type": "object", "properties": {"semana": SEMANA, "cadena": CADENA}}},
 ]
 FUNCIONES = {"semanas_disponibles": h_semanas, "buscar_tienda": h_buscar_tienda, "resumen_tienda": h_resumen_tienda,
              "kpis": h_kpis, "ranking": h_ranking, "info_producto": h_producto, "semana_a_semana": h_semana_a_semana,
-             "acciones": h_acciones, "visitadas_vs_no": h_visitadas}
+             "acciones": h_acciones, "visitadas_vs_no": h_visitadas, "simular": h_simular}
 
 
 def ejecutar(D: Datos, nombre: str, args: dict) -> str:
@@ -429,6 +471,7 @@ Reglas:
   excedente = piezas por encima de {D.M['umbrales']['dias_max']} días de venta; estancado = inventario con venta 0 (posible inventario fantasma);
   urgencia = calificación 0-100 por tienda; prioritarias = el {D.M['pct_prioritarias']}% de tiendas más urgentes.
 - Metas: {metas}.
+- Para preguntas hipotéticas ("¿qué pasaría si…?") usa la herramienta simular y aclara que es una estimación con supuestos.
 - Si te piden algo fuera de esta base (precios, otras empresas, opiniones), di amablemente que solo puedes responder sobre estos datos.
 
 Cadenas: {', '.join(D.cadenas)}. Semanas en la base: {', '.join(motor.etiqueta_semana(k) for k in D.semanas)}."""

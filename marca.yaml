@@ -54,3 +54,26 @@ kpis:
   dias:         {nombre: Días de inventario (mediana),  unidad: " días", inicio: 140,  meta: 90,  mas_es_mejor: false, usuario: Mandos medios, fuente: "On Hand ÷ venta diaria"}
   venta:        {nombre: Venta semanal,                 unidad: " pzs",  inicio: 0,    meta: 0,   mas_es_mejor: true,  usuario: Dirección,     fuente: "~Prom Venta L5W"}
   cobertura:    {nombre: Tiendas reportadas,            unidad: "%",     inicio: 78,   meta: 95,  mas_es_mejor: true,  usuario: Todos,         fuente: "Tiendas de la semana ÷ tiendas del periodo"}
+
+# Escenarios guardados del Simulador. Los parámetros posibles:
+#   demanda_pct (−50 a 100), demanda_cadenas [lista], visitas_extra (−1 = todas las prioritarias sin visita),
+#   reasignar (true/false), efecto_visita (%), resurtir_pct, rebalanceo_pct, excedente_pct, estancado_pct, dias_max
+escenarios:
+  "🎄 Navidad sin plan":
+    descripcion: "La venta sube 35 % (temporada) y la operación sigue igual."
+    params: {demanda_pct: 35}
+  "🔁 Reasignar visitas (mismo equipo)":
+    descripcion: "Las tiendas prioritarias que no se visitan toman el lugar de las visitadas con menos urgencia."
+    params: {visitas_extra: -1, reasignar: true, efecto_visita: 50}
+  "♻️ Rebalanceo de excedente":
+    descripcion: "Se mueve la mitad del excedente a tiendas de la misma cadena y estado donde ese producto falta."
+    params: {rebalanceo_pct: 50}
+  "👻 Limpieza de estancado":
+    descripcion: "Se recupera la mitad de las piezas sin venta (bodega, inventario fantasma, devolución)."
+    params: {estancado_pct: 50}
+  "🎯 Plan para llegar a las metas":
+    descripcion: "Reasignar visitas + resurtir agotados + rebalancear y reducir excedente + limpiar estancado."
+    params: {visitas_extra: -1, reasignar: true, efecto_visita: 50, resurtir_pct: 60, rebalanceo_pct: 50, excedente_pct: 35, estancado_pct: 60}
+  "🎄🎯 Navidad con plan":
+    descripcion: "La venta sube 35 % y se aplica el plan completo."
+    params: {demanda_pct: 35, visitas_extra: -1, reasignar: true, efecto_visita: 50, resurtir_pct: 60, rebalanceo_pct: 50, excedente_pct: 35, estancado_pct: 60}
