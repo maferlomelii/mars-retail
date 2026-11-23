@@ -532,6 +532,7 @@ def cliente_claude(llave):
 
 def pagina_chat():
     llave = secreto("ANTHROPIC_API_KEY")
+    llave = re.sub(r"\s+", "", str(llave)) if llave else None   # quita saltos de línea y espacios que se cuelan al pegar
     if not llave:
         st.info("Para usar el asistente falta la llave de Claude. En Streamlit Cloud ve a **Settings → Secrets** y agrega:\n\n"
                 "`ANTHROPIC_API_KEY = \"sk-ant-...\"`")
