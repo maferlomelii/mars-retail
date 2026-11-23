@@ -1,0 +1,14 @@
+# CONFIG DE EJEMPLO - solo para probar. Usuario: demo / contraseña: demo1234
+# Para uso real: copia este archivo a config.yaml, cambia usuarios y contraseñas
+# (usa make_password.py para generar los hashes) y NO subas config.yaml a GitHub.
+credentials:
+  usernames:
+    demo:
+      name: Usuario Demo
+      email: demo@example.com
+      password: $2b$12$YlHdeaRVdXxDBe531HpXaOPrbOta3956.YIuYy8DXgfUEY.Uwb6Ra
+      
+cookie:
+  name: mars_retail_demo
+  key: 0dfe04dda4fd70db0b709529640be3be7ac2394c304c4e41
+  expiry_days: 7

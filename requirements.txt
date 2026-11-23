@@ -1,0 +1,11 @@
+streamlit>=1.50
+streamlit-authenticator==0.4.2
+google-auth
+requests
+pandas
+numpy
+altair
+pyyaml
+reportlab
+openpyxl
+python-calamine

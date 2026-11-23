@@ -1,0 +1,56 @@
+# Configuración del cliente: todo lo que cambia de un cliente a otro está aquí.
+# Para cambiar metas, umbrales o colores se edita este archivo, no app.py.
+
+cliente: Mars
+titulo_app: Mars · Retail Intelligence
+subtitulo: Inventario y venta en tienda · Prototipo Reto Tec AD2007B
+icono: "🍫"
+
+colores:
+  oscuro: "#0A0A5C"       # textos y barra lateral
+  claro: "#F4F6FF"        # fondo
+  tarjeta: "#FFFFFF"      # tarjetas
+  acento: "#0000A0"       # azul Mars
+  acento_claro: "#00A3FF" # azul cielo
+  rosa: "#F0145A"         # rosa Mars (resaltados)
+  verde: "#1F9E7A"        # "en meta"
+  amarillo: "#E0A100"     # "en camino"
+  rojo: "#D7263D"         # "atrasado"
+  gris: "#5B6080"
+  linea: "#DDE3F5"
+
+# Reglas del semáforo de inventario (en días).
+# "por_cadena" permite poner otros valores a una cadena, por ejemplo:
+#   por_cadena:
+#     SAMS: {dias_max: 60}
+umbrales:
+  dias_riesgo: 7       # menos de 7 días (contando lo que viene en camino) = por agotarse
+  dias_max: 90         # más de 90 días = excedente
+  dias_objetivo: 30    # al resurtir, cuántos días de venta queremos cubrir
+  por_cadena: {}
+
+# Tiendas prioritarias: el % de tiendas con mayor calificación de urgencia
+pct_prioritarias: 20
+
+# Peso de cada ingrediente en la calificación de urgencia (suman 100)
+pesos_urgencia:
+  venta_en_riesgo: 40     # venta de productos agotados o por agotarse
+  estancado: 25           # piezas con venta 0
+  excedente: 15           # piezas por encima de 90 días
+  venta_tienda: 20        # tamaño de la tienda
+
+# Una semana se marca "con carga incompleta" si una cadena reporta menos de este % de sus tiendas
+cobertura_minima: 95
+# Una semana se marca "venta sospechosa" si la venta (mismos pares tienda-producto)
+# cambia más que esto contra la semana anterior. Un promedio de 5 semanas casi no puede moverse más de ~20 %.
+cambio_venta_max: 25
+
+# Indicadores: línea base (semana 3 del periodo 11 de 2026), meta y si "más es mejor"
+kpis:
+  agotados:     {nombre: Productos agotados,            unidad: "%",     inicio: 8.0,  meta: 5,   mas_es_mejor: false, usuario: Operaciones,   fuente: "On Hand = 0 con venta > 0"}
+  excedente:    {nombre: Inventario excedente,          unidad: "%",     inicio: 39.8, meta: 32,  mas_es_mejor: false, usuario: Mandos medios, fuente: "Piezas por encima de 90 días de venta"}
+  estancado:    {nombre: Inventario estancado,          unidad: "%",     inicio: 9.1,  meta: 5,   mas_es_mejor: false, usuario: Operaciones,   fuente: "Piezas en tienda con venta 0"}
+  prioritarias: {nombre: Tiendas prioritarias visitadas, unidad: "%",    inicio: 78,   meta: 90,  mas_es_mejor: true,  usuario: Dirección,     fuente: "Ruteo.¿SE VISITA? + calificación de urgencia"}
+  dias:         {nombre: Días de inventario (mediana),  unidad: " días", inicio: 140,  meta: 90,  mas_es_mejor: false, usuario: Mandos medios, fuente: "On Hand ÷ venta diaria"}
+  venta:        {nombre: Venta semanal,                 unidad: " pzs",  inicio: 0,    meta: 0,   mas_es_mejor: true,  usuario: Dirección,     fuente: "~Prom Venta L5W"}
+  cobertura:    {nombre: Tiendas reportadas,            unidad: "%",     inicio: 78,   meta: 95,  mas_es_mejor: true,  usuario: Todos,         fuente: "Tiendas de la semana ÷ tiendas del periodo"}
