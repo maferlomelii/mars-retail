@@ -23,6 +23,7 @@ import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
 
+import agente
 import datos_demo
 import motor
 from report import build_pdf
@@ -200,9 +201,9 @@ if estado_login is None:
 marca_slot.empty()
 
 # ------------------------------------------------------------------- barra lateral
-PAGINAS = ["📊 Resumen", "🗺️ Regiones y tiendas", "🚨 Alertas", "🧪 Calidad del dato", "📄 Reporte"]
+PAGINAS = ["📊 Resumen", "🗺️ Regiones y tiendas", "🚨 Alertas", "🤖 Pregúntale a la base", "🧪 Calidad del dato", "📄 Reporte"]
 QUIEN = {"📊 Resumen": "Dirección", "🗺️ Regiones y tiendas": "Mandos medios", "🚨 Alertas": "Operaciones",
-         "🧪 Calidad del dato": "Todos", "📄 Reporte": "Dirección"}
+         "🤖 Pregúntale a la base": "Todos", "🧪 Calidad del dato": "Todos", "📄 Reporte": "Dirección"}
 with st.sidebar:
     st.markdown("<div class='brand'>MARS<span>.</span><small>Retail Intelligence</small></div>", unsafe_allow_html=True)
     st.write("")
@@ -518,6 +519,68 @@ def pagina_alertas():
     st.download_button("⬇️ Descargar lista completa (CSV)", vista.to_csv(index=False).encode("utf-8-sig"),
                        f"acciones_{semana}.csv", "text/csv")
 
+SUGERENCIAS = ["¿Cuánto vendió SM PUEBLA esta semana?", "¿Qué cadena tiene más productos agotados?",
+               "Top 5 tiendas más urgentes que no se visitan", "¿Cómo va MIX MARS?",
+               "¿Qué tiene que hacer el Ejecutivo 14?", "¿Cómo cambió la venta de Soriana semana a semana?"]
+
+
+@st.cache_resource(show_spinner=False)
+def cliente_claude(llave):
+    import anthropic
+    return anthropic.Anthropic(api_key=llave)
+
+
+def pagina_chat():
+    llave = secreto("ANTHROPIC_API_KEY")
+    if not llave:
+        st.info("Para usar el asistente falta la llave de Claude. En Streamlit Cloud ve a **Settings → Secrets** y agrega:\n\n"
+                "`ANTHROPIC_API_KEY = \"sk-ant-...\"`")
+        return
+    st.caption("Pregunta en español sobre venta, inventario, agotados, tiendas, productos o semanas. Los números salen "
+               "directo de la base (no los inventa la IA). Responde sobre todas las cadenas; si no dices semana, usa "
+               f"la recomendada ({motor.etiqueta_semana(CAL['recomendada'])}).")
+    D = agente.Datos(H, TI, CAL, MARCA, lambda k, cads: semana_calc(H, TI, ORIGEN_KEY, k, cads))
+    chat = st.session_state.setdefault("chat", [])
+    elegida = None
+    if not chat:
+        st.write("**Prueba con:**")
+        cols = st.columns(3)
+        for i, q in enumerate(SUGERENCIAS):
+            if cols[i % 3].button(q, key=f"sug_{i}", width="stretch"):
+                elegida = q
+    for m in chat:
+        with st.chat_message(m["role"], avatar="🧑" if m["role"] == "user" else "🍫"):
+            st.markdown(m["content"])
+            if m.get("herr"):
+                st.caption("🔎 Consulté: " + " · ".join(m["herr"]))
+    pregunta = st.chat_input("Ej. ¿cuánto vendió BA ENSENADA la semana 2?") or elegida
+    if pregunta:
+        with st.chat_message("user", avatar="🧑"):
+            st.markdown(pregunta)
+        with st.chat_message("assistant", avatar="🍫"):
+            with st.spinner("Consultando la base…"):
+                historial = [{"role": m["role"], "content": m["content"]} for m in chat]
+                try:
+                    texto, herr = agente.responder(cliente_claude(llave), D, historial, pregunta)
+                except Exception as e:  # noqa: BLE001
+                    msg = str(e).lower()
+                    if "credit" in msg or "billing" in msg:
+                        texto = "Se acabaron los créditos de la API de Claude. Recarga en platform.claude.com → Billing."
+                    elif "authentication" in msg or "api key" in msg or "401" in msg:
+                        texto = "La llave ANTHROPIC_API_KEY no es válida. Revísala en Settings → Secrets."
+                    elif "rate" in msg or "429" in msg or "overloaded" in msg:
+                        texto = "Hay muchas preguntas al mismo tiempo. Espera unos segundos y vuelve a intentar."
+                    else:
+                        texto = f"No pude responder ({type(e).__name__}). Intenta de nuevo."
+                    herr = []
+            st.markdown(texto)
+            if herr:
+                st.caption("🔎 Consulté: " + " · ".join(herr))
+        chat += [{"role": "user", "content": pregunta}, {"role": "assistant", "content": texto, "herr": herr}]
+    if chat and st.button("🗑️ Borrar conversación"):
+        st.session_state["chat"] = []
+        st.rerun()
+
 
 def pagina_calidad():
     st.caption("Antes de decidir con los datos, hay que saber si la semana llegó completa y si los números cuadran.")
@@ -579,7 +642,7 @@ if CAL["resumen"].loc[semana, "Venta sospechosa"]:
     st.warning(f"La venta de esta semana no cuadra con la anterior. Se recomienda usar {motor.etiqueta_semana(CAL['recomendada'])}.")
 
 {"📊 Resumen": pagina_resumen, "🗺️ Regiones y tiendas": pagina_regiones, "🚨 Alertas": pagina_alertas,
- "🧪 Calidad del dato": pagina_calidad, "📄 Reporte": pagina_reporte}[pagina]()
+ "🤖 Pregúntale a la base": pagina_chat, "🧪 Calidad del dato": pagina_calidad, "📄 Reporte": pagina_reporte}[pagina]()
 
 
 # Revisa cada minuto si el Excel de Drive cambió; si sí, recarga todo solo.
