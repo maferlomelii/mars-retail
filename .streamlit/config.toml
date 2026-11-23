@@ -1,0 +1,21 @@
+# Tema de marca: Mars (prototipo Reto Tec)
+[theme]
+base = "light"
+primaryColor = "#F0145A"
+backgroundColor = "#F4F6FF"
+secondaryBackgroundColor = "#E8ECFB"
+textColor = "#0A0A5C"
+linkColor = "#0000A0"
+baseRadius = "large"
+font = "DM Sans:https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
+headingFont = "Outfit:https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&display=swap"
+headingFontWeights = [800, 700, 700, 700, 600, 600]
+
+[theme.sidebar]
+backgroundColor = "#0000A0"
+secondaryBackgroundColor = "#1A1AB0"
+textColor = "#FFFFFF"
+primaryColor = "#F0145A"
+
+[server]
+maxUploadSize = 100
